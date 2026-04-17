@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quijote Invaders - Fluidez Total</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body { background-color: #1a1a1a; font-family: 'Press Start 2P', cursive; touch-action: manipulation; }
+        canvas { image-rendering: pixelated; background: linear-gradient(to bottom, #0f172a 0%, #000000 100%); border: 4px solid #8b4513; }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden">
+
+    <div class="w-full max-w-2xl flex justify-between mb-2 text-white text-xs md:text-sm">
+        <div id="scoreDisplay">Puntos: 0</div>
+        <div id="livesDisplay">Vidas: 3</div>
+    </div>
+
+    <div class="relative">
+        <canvas id="gameCanvas" width="600" height="500" class="shadow-2xl rounded-lg w-full max-w-2xl"></canvas>
+        <div id="overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-center p-6 transition-opacity duration-300">
+            <h1 id="overlayTitle" class="text-yellow-500 text-2xl md:text-4xl mb-6">QUIJOTE INVADERS</h1>
+            <p id="overlayText" class="text-white text-[10px] mb-8">¡Doma a los gigantes de viento!</p>
+            <button id="startBtn" class="bg-yellow-600 hover:bg-yellow-500 text-white px-6 py-3 border-b-4 border-yellow-800 active:border-b-0">
+                COMENZAR
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-4 mt-6 w-full max-w-xs md:hidden">
+        <button id="leftBtn" class="bg-gray-700 p-4 rounded-full text-white select-none">←</button>
+        <button id="shootBtn" class="bg-red-700 p-4 rounded-full text-white select-none">⚔️</button>
+        <button id="rightBtn" class="bg-gray-700 p-4 rounded-full text-white select-none">→</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlayTitle');
+        const startBtn = document.getElementById('startBtn');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const livesDisplay = document.getElementById('livesDisplay');
+
+        let score = 0, lives = 3, gameActive = false;
+        let quijote = { x: 280, y: 430, w: 45, h: 45, speed: 6 }; 
+        let bullets = [], enemyBullets = [], enemies = [];
+        let enemyDirection = 1;
+        let baseEnemySpeed = 0.6;
+        let frameCount = 0;
+        let globalRotationTimer = 0;
+        let keys = {};
+        let lastShotTime = 0;
+
+        function initEnemies() {
+            enemies = [];
+            const rows = 3, cols = 6;
+            const spacingX = 80;
+            const spacingY = 60;
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    enemies.push({ x: 80 + c * spacingX, y: 50 + r * spacingY, w: 40, h: 40, alive: true });
+                }
+            }
+        }
+
+        function drawQuijote(x, y) {
+            ctx.fillStyle = "#bdc3c7"; ctx.fillRect(x + 12, y + 18, 20, 20);
+            ctx.fillStyle = "#ffdbac"; ctx.beginPath(); ctx.arc(x + 22, y + 12, 8, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#7f8c8d"; ctx.fillRect(x + 10, y + 5, 24, 4);
+        }
+
+        function drawMolino(en) {
+            const {x, y} = en;
+            const currentAngle = globalRotationTimer;
+            ctx.fillStyle = "#ecf0f1";
+            ctx.beginPath();
+            ctx.moveTo(x + 10, y + 40); ctx.lineTo(x + 30, y + 40);
+            ctx.lineTo(x + 25, y + 15); ctx.lineTo(x + 15, y + 15);
+            ctx.fill();
+            ctx.save();
+            ctx.translate(x + 20, y + 15);
+            ctx.rotate(currentAngle);
+            ctx.fillStyle = "#8b4513";
+            for(let i = 0; i < 4; i++) {
+                ctx.rotate(Math.PI / 2);
+                ctx.fillRect(-2, 0, 4, 18);
+                ctx.fillRect(-8, 10, 12, 5);
+            }
+            ctx.restore();
+        }
+
+        function drawLanza(x, y) {
+            ctx.fillStyle = "#8b4513";
+            ctx.fillRect(x + 3, y + 5, 3, 20);
+            ctx.fillStyle = "#ecf0f1";
+            ctx.beginPath();
+            ctx.moveTo(x, y + 5); ctx.lineTo(x + 4.5, y); ctx.lineTo(x + 9, y + 5);
+            ctx.fill();
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            // Movimiento fluido del Quijote
+            if (keys['ArrowLeft'] && quijote.x > 0) quijote.x -= quijote.speed;
+            if (keys['ArrowRight'] && quijote.x < canvas.width - quijote.w) quijote.x += quijote.speed;
+            
+            // Disparo fluido con cadencia controlada
+            if (keys['Space']) {
+                const now = Date.now();
+                if (now - lastShotTime > 300) { // Un disparo cada 300ms
+                    bullets.push({ x: quijote.x + 18, y: quijote.y, w: 9, h: 25 });
+                    lastShotTime = now;
+                }
+            }
+
+            globalRotationTimer += 0.05; 
+
+            // Movimiento Lanzas
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                bullets[i].y -= 7;
+                if (bullets[i].y < -30) bullets.splice(i, 1);
+            }
+
+            // Movimiento Piedras (Más lentas y sin reset de juego al impacto)
+            for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                let eb = enemyBullets[i];
+                eb.y += 3; // Velocidad reducida
+                if (eb.y > canvas.height) {
+                    enemyBullets.splice(i, 1);
+                    continue;
+                }
+                // Colisión con Quijote
+                if (eb.x < quijote.x + quijote.w && eb.x + 10 > quijote.x &&
+                    eb.y < quijote.y + quijote.h && eb.y + 10 > quijote.y) {
+                    enemyBullets.splice(i, 1);
+                    lives--;
+                    updateUI();
+                    if (lives <= 0) gameOver();
+                }
+            }
+
+            // Movimiento Molinos
+            let hitEdge = false;
+            let aliveCount = 0;
+
+            enemies.forEach(en => {
+                if (!en.alive) return;
+                aliveCount++;
+                en.x += enemyDirection * baseEnemySpeed;
+                if (en.x <= 5 || en.x + en.w >= canvas.width - 5) hitEdge = true;
+
+                // Colisión lanza -> molino
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    let b = bullets[i];
+                    if (b.x < en.x + en.w && b.x + b.w > en.x && b.y < en.y + en.h && b.y + b.h > en.y) {
+                        en.alive = false;
+                        bullets.splice(i, 1);
+                        score += 100;
+                        updateUI();
+                        break; 
+                    }
+                }
+                if (en.y + en.h >= quijote.y) gameOver();
+            });
+
+            if (hitEdge) {
+                enemyDirection *= -1;
+                enemies.forEach(en => en.y += 15);
+            }
+
+            if (aliveCount === 0) {
+                initEnemies();
+                baseEnemySpeed += 0.1;
+            }
+
+            if (frameCount % 100 === 0) {
+                const aliveEnemies = enemies.filter(en => en.alive);
+                if (aliveEnemies.length > 0) {
+                    const shooter = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
+                    enemyBullets.push({ x: shooter.x + 15, y: shooter.y + 20 });
+                }
+            }
+            frameCount++;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawQuijote(quijote.x, quijote.y);
+            enemies.forEach(en => { if (en.alive) drawMolino(en); });
+            bullets.forEach(b => drawLanza(b.x, b.y));
+            enemyBullets.forEach(eb => {
+                ctx.fillStyle = "#95a5a6";
+                ctx.beginPath(); ctx.arc(eb.x + 5, eb.y + 5, 6, 0, Math.PI * 2); ctx.fill();
+            });
+        }
+
+        function updateUI() {
+            scoreDisplay.innerText = `Puntos: ${score}`;
+            livesDisplay.innerText = `Vidas: ${lives}`;
+        }
+
+        function gameOver() {
+            gameActive = false;
+            overlay.classList.remove('opacity-0', 'pointer-events-none');
+            overlayTitle.innerText = "¡DERROTADO!";
+            startBtn.innerText = "REINTENTAR";
+        }
+
+        function resetGame() {
+            score = 0; lives = 3; baseEnemySpeed = 0.6;
+            bullets = []; enemyBullets = [];
+            quijote.x = 280;
+            initEnemies();
+            updateUI();
+            gameActive = true;
+            overlay.classList.add('opacity-0', 'pointer-events-none');
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        startBtn.addEventListener('click', resetGame);
+        
+        const btns = { 'leftBtn': 'ArrowLeft', 'rightBtn': 'ArrowRight', 'shootBtn': 'Space' };
+        Object.keys(btns).forEach(id => {
+            const el = document.getElementById(id);
+            el.onmousedown = el.ontouchstart = (e) => { e.preventDefault(); keys[btns[id]] = true; };
+            el.onmouseup = el.ontouchend = () => keys[btns[id]] = false;
+        });
+    </script>
+</body>
+</html>
